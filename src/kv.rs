@@ -28,7 +28,7 @@ impl KvStore {
     /// use kvs::KvStore;
     /// let mut store = KvStore::new();
     /// ```
-    pub fn new() -> KvStore {
+    pub fn new() -> Self {
         KvStore {
             map: HashMap::new(),
         }
@@ -82,5 +82,12 @@ impl KvStore {
     /// ```
     pub fn remove(&mut self, key: String) {
         self.map.remove(&key);
+    }
+}
+
+impl Default for KvStore {
+    /// Creates an empty KvStore.
+    fn default() -> Self {
+        Self::new()
     }
 }
