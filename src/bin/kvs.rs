@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(name = "kvs", author, version, about, long_about = None)]
 struct Options {
     #[command(subcommand)]
     command: Commands,
@@ -38,15 +38,15 @@ fn main() {
     println!("{:?}", options);
 
     match &options.command {
-        Commands::Set(set) => {
+        Commands::Set(_set) => {
             eprintln!("set unimplemented");
             std::process::exit(1);
         }
-        Commands::Get(get) => {
+        Commands::Get(_get) => {
             eprintln!("get unimplemented");
             std::process::exit(1);
         }
-        Commands::Rm(rm) => {
+        Commands::Rm(_rm) => {
             eprintln!("remove unimplemented");
             std::process::exit(1);
         }
