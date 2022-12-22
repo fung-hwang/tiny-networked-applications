@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// The `KvStore` stores string key/value pairs in memory.
 ///
@@ -16,8 +17,10 @@ use std::collections::HashMap;
 /// store.remove("key".to_string());
 /// ```
 pub struct KvStore {
-    map: HashMap<String, String>,
+    index: HashMap<String, String>,
 }
+
+pub type Result<T> = anyhow::Result<T>;
 
 impl KvStore {
     /// Creates an empty KvStore.
@@ -30,8 +33,15 @@ impl KvStore {
     /// ```
     pub fn new() -> Self {
         KvStore {
-            map: HashMap::new(),
+            index: HashMap::new(),
         }
+    }
+
+    /// Open the KvStore at a given path.
+    pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
+        // if file exists, open it, then rebuild index
+        // if not, create
+        panic!();
     }
 
     /// Set the value of a string key to a string.
@@ -46,8 +56,9 @@ impl KvStore {
     /// let mut store = KvStore::new();
     /// store.set("key".to_string(), "value".to_string());
     /// ```
-    pub fn set(&mut self, key: String, value: String) {
-        self.map.insert(key, value);
+    pub fn set(&mut self, key: String, value: String) -> Result<()> {
+        // self.map.insert(key, value);
+        panic!();
     }
 
     /// Get the string value of a given string key.
@@ -65,8 +76,9 @@ impl KvStore {
     /// assert_eq!(val, Some("value".to_string()));
     /// assert_eq!(store.get("invalid_Key".to_string()), None);
     /// ```
-    pub fn get(&self, key: String) -> Option<String> {
-        self.map.get(&key).cloned()
+    pub fn get(&mut self, key: String) -> Result<Option<String>> {
+        // self.map.get(&key).cloned()
+        panic!();
     }
 
     /// Remove a given key.
@@ -80,8 +92,9 @@ impl KvStore {
     /// store.set("key".to_string(), "value".to_string());
     /// store.remove("key".to_string());
     /// ```
-    pub fn remove(&mut self, key: String) {
-        self.map.remove(&key);
+    pub fn remove(&mut self, key: String) -> Result<()> {
+        // self.map.remove(&key);
+        panic!();
     }
 }
 
