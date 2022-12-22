@@ -1,5 +1,63 @@
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::SeekFrom;
+use std::io::{BufReader, BufWriter};
+use std::io::{Read, Write};
 use std::path::PathBuf;
+
+use anyhow::Ok;
+
+pub type Result<T> = anyhow::Result<T>;
+
+struct BufReaderWithPos<T: Seek + Read> {
+    buf_reader: BufReader<T>,
+    pos: usize,
+}
+
+impl<T: Seek + Read> BufReaderWithPos<T> {
+    fn new(inner: T) -> Self {
+        let pos = inner.seek(SeekFrom::Current(0));
+        Self {
+            buf_reader: BufReader::new(inner),
+            pos,
+        }
+    }
+}
+
+impl<T: Seek + Read> Read for BufReaderWithPos<T> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        let n = self.buf_reader.read(buf)?;
+        self.pos += n;
+        Ok(n)
+    }
+}
+
+struct BufWriterWithPos<T: Seek + Write> {
+    buf_writer: BufWriter<T>,
+    pos: usize,
+}
+
+impl<T: Seek + Write> BufWriterWithPos<T> {
+    fn new(inner: T) -> Self {
+        let pos = inner.seek(SeekFrom::Current(0));
+        Self {
+            buf_writer: BufWriter::new(inner),
+            pos,
+        }
+    }
+}
+
+impl<T: Seek + Write> Write for BufWriterWithPos<T> {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        let n = self.buf_writer.write(buf)?;
+        self.pos += n;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.buf_writer.flush()
+    }
+}
 
 /// The `KvStore` stores string key/value pairs in memory.
 ///
@@ -18,27 +76,15 @@ use std::path::PathBuf;
 /// ```
 pub struct KvStore {
     index: HashMap<String, String>,
+    path: PathBuf, // file name
+    reader: BufReaderWithPos,
+    writer: BufWriterWithPos,
 }
 
-pub type Result<T> = anyhow::Result<T>;
-
 impl KvStore {
-    /// Creates an empty KvStore.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use kvs::KvStore;
-    /// let mut store = KvStore::new();
-    /// ```
-    pub fn new() -> Self {
-        KvStore {
-            index: HashMap::new(),
-        }
-    }
-
     /// Open the KvStore at a given path.
     pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
+        let path: PathBuf = path.into();
         // if file exists, open it, then rebuild index
         // if not, create
         panic!();
@@ -57,7 +103,12 @@ impl KvStore {
     /// store.set("key".to_string(), "value".to_string());
     /// ```
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
-        // self.map.insert(key, value);
+        // write log to file, store key->offset in index
+        let command = Command::Set { key, value };
+        serde_json::to_writer(self.writer, &command)?;
+        self.writer.flush()?;
+        //TODO
+
         panic!();
     }
 
@@ -77,7 +128,7 @@ impl KvStore {
     /// assert_eq!(store.get("invalid_Key".to_string()), None);
     /// ```
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        // self.map.get(&key).cloned()
+        // search k/v in index ,load form log file
         panic!();
     }
 
@@ -93,14 +144,16 @@ impl KvStore {
     /// store.remove("key".to_string());
     /// ```
     pub fn remove(&mut self, key: String) -> Result<()> {
-        // self.map.remove(&key);
+        // write log to file, store key->offset in index
+        let command = Command::Remove { key };
+        serde_json::to_writer(self.writer, &command)?;
+        self.writer.flush()?;
         panic!();
     }
 }
 
-impl Default for KvStore {
-    /// Creates an empty KvStore.
-    fn default() -> Self {
-        Self::new()
-    }
+#[derive(Serialize, Deserialize, Debug)]
+enum Command {
+    Set { key: String, value: String },
+    Remove { key: String },
 }
