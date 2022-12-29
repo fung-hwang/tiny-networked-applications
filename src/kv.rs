@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{read, File};
 use std::io;
 use std::io::{BufReader, BufWriter};
 use std::io::{Read, Write};
@@ -171,7 +171,17 @@ impl KvStore {
     /// ```
     pub fn get(&mut self, key: String) -> anyhow::Result<Option<String>> {
         // search k/v in index ,load form log file
-        panic!();
+        if let Some(CommandPos { file_id, pos, len }) = self.index.get(&key) {
+            let mut reader = self.readers.get_mut(&file_id).unwrap();
+            reader.seek(SeekFrom::Start(*pos)).unwrap();
+            let mut a = serde_json::Deserializer::from_reader(&mut reader);
+            let cmd = Command::deserialize(&mut a).unwrap();
+
+            anyhow::Ok(Some((serde_json::to_string(&cmd)?)))
+        } else {
+            println!("Key not found");
+            anyhow::Ok(None)
+        }
     }
 
     /// Remove a given key.
@@ -197,18 +207,10 @@ impl KvStore {
             serde_json::to_writer(&mut self.writer, &command)?;
             self.writer.flush()?;
 
-            // Insert new entry in index
-            if let Command::Set { key, .. } = command {
-                self.index.insert(
-                    key,
-                    CommandPos {
-                        file_id: self.cur_file_id,
-                        pos: old_writer_pos,
-                        len: self.writer.pos - old_writer_pos,
-                    },
-                );
+            if let Command::Remove { key } = command {
+                // Remove key from index
+                self.index.remove(&key).unwrap();
             }
-
             anyhow::Ok(())
         }
     }
