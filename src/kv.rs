@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Ok};
+use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -6,8 +6,6 @@ use std::fs::{self, create_dir_all, File};
 use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::result;
-
-pub type Result<T> = anyhow::Result<T>;
 
 struct BufReaderWithPos<T: Seek + Read> {
     buf_reader: BufReader<T>,
@@ -34,14 +32,8 @@ impl<T: Seek + Read> Read for BufReaderWithPos<T> {
 
 impl<T: Seek + Read> Seek for BufReaderWithPos<T> {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        match pos {
-            SeekFrom::Start(n) => {
-                // self.pos = n;
-                self.buf_reader.seek(pos)?;
-                result::Result::Ok(n)
-            }
-            _ => panic!(), // Todo
-        }
+        let n = self.buf_reader.seek(pos)?;
+        result::Result::Ok(n)
     }
 }
 
@@ -83,7 +75,6 @@ enum Command {
 struct CommandPos {
     file_id: u64,
     pos: u64,
-    // len: u64,
 }
 
 /// The `KvStore` stores string key/value pairs in memory.
@@ -103,14 +94,14 @@ struct CommandPos {
 /// ```
 pub struct KvStore {
     index: HashMap<String, CommandPos>, // A map of keys to log pointers
-    readers: HashMap<u64, BufReaderWithPos<File>>, // Map: file_id -> reader
+    readers: HashMap<u64, BufReaderWithPos<File>>, // A map of file_id to reader
     writer: BufWriterWithPos<File>,     // Writer of active data file
     active_file_id: u64,                // Active data file
 }
 
 impl KvStore {
     /// Open the KvStore at a given path.
-    pub fn open(path: impl Into<PathBuf>) -> anyhow::Result<KvStore> {
+    pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
         let path: PathBuf = path.into();
         create_dir_all(&path).unwrap();
 
@@ -166,7 +157,6 @@ impl KvStore {
                 CommandPos {
                     file_id: self.active_file_id,
                     pos: entry_pos,
-                    // len: self.writer.pos - old_writer_pos,
                 },
             );
         }
@@ -199,8 +189,7 @@ impl KvStore {
             if let Command::Set { value, .. } = cmd {
                 Ok(Some(value))
             } else {
-                // TODO: rm
-                Ok(None)
+                Err(Error::UnexpectedCommand)
             }
         } else {
             Ok(None)
@@ -220,7 +209,7 @@ impl KvStore {
     /// ```
     pub fn remove(&mut self, key: String) -> Result<()> {
         if !self.index.contains_key(&key) {
-            Err(anyhow!("key not found"))
+            Err(Error::KeyNotFound)
         } else {
             // Write log to file, store key->offset in index
             let command = Command::Remove { key };
@@ -231,6 +220,7 @@ impl KvStore {
                 // Remove key from index
                 self.index.remove(&key).unwrap();
             }
+
             Ok(())
         }
     }
@@ -289,14 +279,7 @@ fn load_index(
         let new_pos = stream.byte_offset() as u64;
         match cmd? {
             Command::Set { key, .. } => {
-                index.insert(
-                    key,
-                    CommandPos {
-                        file_id,
-                        pos,
-                        // len: new_pos - pos,
-                    },
-                );
+                index.insert(key, CommandPos { file_id, pos });
             }
             Command::Remove { key } => {
                 index.remove(&key);

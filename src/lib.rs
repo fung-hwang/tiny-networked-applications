@@ -1,5 +1,7 @@
 //! A key-value store
 
-pub use kv::{KvStore, Result};
+pub use error::{Error, Result};
+pub use kv::KvStore;
 
+mod error;
 mod kv;
