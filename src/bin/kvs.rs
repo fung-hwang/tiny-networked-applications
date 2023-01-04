@@ -54,12 +54,16 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Rm(Remove { key }) => {
-            if let Err(Error::KeyNotFound) = store.remove(key) {
+        Commands::Rm(Remove { key }) => match store.remove(key) {
+            Ok(_) => {}
+            Err(Error::KeyNotFound) => {
                 print!("Key not found");
                 std::process::exit(1);
             }
-        }
+            Err(err) => {
+                return Err(err);
+            }
+        },
     }
     Ok(())
 }

@@ -14,7 +14,7 @@ struct BufReaderWithPos<T: Seek + Read> {
 
 impl<T: Seek + Read> BufReaderWithPos<T> {
     fn new(mut inner: T) -> Self {
-        let pos = inner.seek(SeekFrom::Current(0)).unwrap(); // Initial cursor
+        let pos = inner.seek(SeekFrom::Current(0)).unwrap();
         Self {
             buf_reader: BufReader::new(inner),
             pos,
@@ -44,7 +44,7 @@ struct BufWriterWithPos<T: Seek + Write> {
 
 impl<T: Seek + Write> BufWriterWithPos<T> {
     fn new(mut inner: T) -> Self {
-        let pos = inner.seek(SeekFrom::Current(0)).unwrap();
+        let pos = inner.seek(SeekFrom::Current(0)).unwrap(); // Initial cursor
         Self {
             buf_writer: BufWriter::new(inner),
             pos,
@@ -70,27 +70,97 @@ enum Command {
     Remove { key: String },
 }
 
-// Command position in data file
-// used in index
+// Command position in data file, which is used in index.
 struct CommandPos {
     file_id: u64,
     pos: u64,
 }
 
-/// The `KvStore` stores string key/value pairs in memory.
+/// Returns sorted file_ids in the given directory.
+fn sorted_file_list<P: AsRef<Path>>(path: P) -> Result<Vec<u64>> {
+    let mut file_list: Vec<u64> = fs::read_dir(&path)?
+        .flat_map(|res| -> Result<_> { Ok(res?.path()) })
+        .filter(|path| path.is_file() && path.extension() == Some("log".as_ref()))
+        .flat_map(|path| {
+            path.file_name()
+                .and_then(OsStr::to_str)
+                .map(|s| s.trim_end_matches(".log"))
+                .map(str::parse::<u64>)
+        })
+        .flatten()
+        .collect();
+    file_list.sort_unstable();
+    Ok(file_list)
+}
+
+/// PathBuf = path + file_id.log
+fn log_path<P: AsRef<Path>>(path: P, file_id: u64) -> PathBuf {
+    path.as_ref().join(format!("{}.log", file_id))
+}
+
+/// Create a new data file with given file_id and add the reader to the readers map.
 ///
-/// Key/value pairs are stored in a [`HashMap`] in memory and not persisted to disk.
+/// Returns the writer to the log.
+fn new_data_file<P: AsRef<Path>>(
+    path: P,
+    file_id: u64,
+    readers: &mut HashMap<u64, BufReaderWithPos<File>>,
+) -> Result<BufWriterWithPos<File>> {
+    let path = log_path(&path, file_id);
+    let writer = BufWriterWithPos::new(
+        File::options()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(&path)?,
+    );
+    readers.insert(file_id, BufReaderWithPos::new(File::open(&path)?));
+    Ok(writer)
+}
+
+/// Rebuild index.
+///
+/// Load all data files and store key/command position pairs in the index.
+fn load_index(
+    file_id: u64,
+    reader: &mut BufReaderWithPos<File>,
+    index: &mut HashMap<String, CommandPos>,
+) -> Result<()> {
+    let mut pos = reader.seek(SeekFrom::Start(0))?;
+    let mut stream = serde_json::Deserializer::from_reader(reader).into_iter::<Command>();
+
+    while let Some(cmd) = stream.next() {
+        let new_pos = stream.byte_offset() as u64;
+        match cmd? {
+            Command::Set { key, .. } => {
+                index.insert(key, CommandPos { file_id, pos });
+            }
+            Command::Remove { key } => {
+                index.remove(&key);
+            }
+        }
+        pos = new_pos;
+    }
+    Ok(())
+}
+
+/// The `KvStore` stores string key/value pairs on disk.
+///
+/// Key/value pairs are persisted to disk in data files.
+///
+/// It uses a simplification of the storage algorithm used by bitcask.
 ///
 /// # Example
 ///
 /// ```rust
 /// use kvs::KvStore;
+/// use std::env::current_dir;
 ///
-/// let mut store = KvStore::new();
-/// store.set("key".to_string(), "value".to_string());
-/// let val = store.get("key".to_string());
+/// let mut store = KvStore::open(current_dir().unwrap()).unwrap();
+/// store.set("key".to_string(), "value".to_string()).unwrap();
+/// let val = store.get("key".to_string()).unwrap();
 /// assert_eq!(val, Some("value".to_string()));
-/// store.remove("key".to_string());
+/// store.remove("key".to_string()).unwrap();
 /// ```
 pub struct KvStore {
     index: HashMap<String, CommandPos>, // A map of keys to log pointers
@@ -101,6 +171,19 @@ pub struct KvStore {
 
 impl KvStore {
     /// Open the KvStore at a given path.
+    ///
+    /// # Errors
+    ///
+    /// It propagates I/O or serialization errors during writing the log.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use kvs::KvStore;
+    /// use std::env::current_dir;
+    ///
+    /// let mut store = KvStore::open(current_dir().unwrap()).unwrap();
+    /// ```
     pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
         let path: PathBuf = path.into();
         create_dir_all(&path).unwrap();
@@ -118,9 +201,9 @@ impl KvStore {
             readers.insert(file_id, reader);
         }
 
-        // Create new log file, which to write
+        // Create new log file(active data file) and its writer
         let active_file_id = (file_list.len() + 1) as u64;
-        let writer = new_log_file(&path, active_file_id, &mut readers)?;
+        let writer = new_data_file(&path, active_file_id, &mut readers)?;
 
         Ok(KvStore {
             index,
@@ -130,17 +213,22 @@ impl KvStore {
         })
     }
 
-    /// Set the value of a string key to a string.
+    /// Inserts a key-value pair into the kvstore.
     ///
-    /// If the map did have this key present, the value is updated.
+    /// If the map did have this key present, the value will be updated.
+    ///
+    /// # Errors
+    ///
+    /// It propagates I/O or serialization errors during writing the log.
     ///
     /// # Example
     ///
     /// ```rust
     /// use kvs::KvStore;
+    /// use std::env::current_dir;
     ///
-    /// let mut store = KvStore::new();
-    /// store.set("key".to_string(), "value".to_string());
+    /// let mut store = KvStore::open(current_dir().unwrap()).unwrap();
+    /// store.set("key".to_string(), "value".to_string()).unwrap();
     /// ```
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         let entry_pos = self.writer.pos;
@@ -166,21 +254,27 @@ impl KvStore {
 
     /// Get the string value of a given string key.
     ///
-    /// Returns [`None`] if the given key does not exist.
+    /// Returns `OK(None)` if the given key does not exist.
+    ///
+    /// # Errors
+    ///
+    /// It returns `KvsError::UnexpectedCommand` if the given command type unexpected.
+    ///
+    /// It propagates I/O or serialization errors during writing the log.
     ///
     /// # Example
     ///
     /// ```rust
     /// use kvs::KvStore;
+    /// use std::env::current_dir;
     ///
-    /// let mut store = KvStore::new();
-    /// store.set("key".to_string(), "value".to_string());
-    /// let val = store.get("key".to_string());
+    /// let mut store = KvStore::open(current_dir().unwrap()).unwrap();
+    /// store.set("key".to_string(), "value".to_string()).unwrap();
+    /// let val = store.get("key".to_string()).unwrap();
     /// assert_eq!(val, Some("value".to_string()));
-    /// assert_eq!(store.get("invalid_Key".to_string()), None);
     /// ```
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        // search k/v in index ,load form log file
+        // Find given key in index, and load command from data file
         if let Some(CommandPos { file_id, pos }) = self.index.get(&key) {
             let reader = self.readers.get_mut(&file_id).unwrap();
             reader.seek(SeekFrom::Start(*pos))?;
@@ -198,20 +292,27 @@ impl KvStore {
 
     /// Remove a given key.
     ///
+    ///  # Errors
+    ///
+    /// It returns `KvsError::KeyNotFound` if the given key is not found.
+    ///
+    /// It propagates I/O or serialization errors during writing the log.
+    ///
     /// # Example
     ///
     /// ```rust
     /// use kvs::KvStore;
+    /// use std::env::current_dir;
     ///
-    /// let mut store = KvStore::new();
-    /// store.set("key".to_string(), "value".to_string());
-    /// store.remove("key".to_string());
+    /// let mut store = KvStore::open(current_dir().unwrap()).unwrap();
+    /// store.set("key".to_string(), "value".to_string()).unwrap();
+    /// store.remove("key".to_string()).unwrap();
     /// ```
     pub fn remove(&mut self, key: String) -> Result<()> {
         if !self.index.contains_key(&key) {
             Err(Error::KeyNotFound)
         } else {
-            // Write log to file, store key->offset in index
+            // Write log to file, and store key/command position pairs in index
             let command = Command::Remove { key };
             serde_json::to_writer(&mut self.writer, &command)?;
             self.writer.flush()?;
@@ -224,68 +325,4 @@ impl KvStore {
             Ok(())
         }
     }
-}
-
-// Returns sorted generation numbers in the given directory.
-fn sorted_file_list(path: &Path) -> Result<Vec<u64>> {
-    let mut file_list: Vec<u64> = fs::read_dir(&path)?
-        .flat_map(|res| -> Result<_> { Ok(res?.path()) })
-        .filter(|path| path.is_file() && path.extension() == Some("log".as_ref()))
-        .flat_map(|path| {
-            path.file_name()
-                .and_then(OsStr::to_str)
-                .map(|s| s.trim_end_matches(".log"))
-                .map(str::parse::<u64>)
-        })
-        .flatten()
-        .collect();
-    file_list.sort_unstable();
-    Ok(file_list)
-}
-
-fn log_path(path: &Path, file_id: u64) -> PathBuf {
-    path.join(format!("{}.log", file_id))
-}
-
-/// Create a new log file with given generation number and add the reader to the readers map.
-///
-/// Returns the writer to the log.
-fn new_log_file(
-    path: &Path,
-    file_id: u64,
-    readers: &mut HashMap<u64, BufReaderWithPos<File>>,
-) -> Result<BufWriterWithPos<File>> {
-    let path = log_path(&path, file_id);
-    let writer = BufWriterWithPos::new(
-        File::options()
-            .create(true)
-            .write(true)
-            .append(true)
-            .open(&path)?,
-    );
-    readers.insert(file_id, BufReaderWithPos::new(File::open(&path)?));
-    Ok(writer)
-}
-
-fn load_index(
-    file_id: u64,
-    reader: &mut BufReaderWithPos<File>,
-    index: &mut HashMap<String, CommandPos>,
-) -> Result<()> {
-    let mut pos = reader.seek(SeekFrom::Start(0))?;
-    let mut stream = serde_json::Deserializer::from_reader(reader).into_iter::<Command>();
-
-    while let Some(cmd) = stream.next() {
-        let new_pos = stream.byte_offset() as u64;
-        match cmd? {
-            Command::Set { key, .. } => {
-                index.insert(key, CommandPos { file_id, pos });
-            }
-            Command::Remove { key } => {
-                index.remove(&key);
-            }
-        }
-        pos = new_pos;
-    }
-    Ok(())
 }
