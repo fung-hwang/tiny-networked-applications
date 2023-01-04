@@ -1,3 +1,4 @@
+use anyhow::Ok;
 use assert_cmd::prelude::*;
 use kvs::{KvStore, Result};
 use predicates::ord::eq;

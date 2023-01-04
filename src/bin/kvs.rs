@@ -1,4 +1,7 @@
+use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
+use kvs::KvStore;
+use std::env::current_dir;
 
 #[derive(Parser, Debug)]
 #[command(name = "kvs", author, version, about, long_about = None)]
@@ -35,20 +38,27 @@ struct Remove {
 
 fn main() {
     let options = Options::parse();
-    println!("{:?}", options);
+    // println!("{:?}", options);
 
-    match &options.command {
-        Commands::Set(_set) => {
-            eprintln!("set unimplemented");
-            std::process::exit(1);
+    let mut store = KvStore::open(current_dir().unwrap()).unwrap();
+
+    match options.command {
+        Commands::Set(Set { key, value }) => {
+            store.set(key, value).unwrap();
         }
-        Commands::Get(_get) => {
-            eprintln!("get unimplemented");
-            std::process::exit(1);
+        Commands::Get(Get { key }) => {
+            let cmd = store.get(key).unwrap();
+            if let Some(value) = cmd {
+                print!("{}", value);
+            } else {
+                print!("Key not found");
+            }
         }
-        Commands::Rm(_rm) => {
-            eprintln!("remove unimplemented");
-            std::process::exit(1);
+        Commands::Rm(Remove { key }) => {
+            if let Err(_) = store.remove(key) {
+                print!("Key not found");
+                std::process::exit(1);
+            }
         }
     }
 }
