@@ -7,6 +7,8 @@ use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::result;
 
+const COMPACT_THRESHOLD: u64 = 1_000_000; // Compact when reaching the threshold
+
 struct BufReaderWithPos<T: Seek + Read> {
     buf_reader: BufReader<T>,
     pos: u64, // TODO: necessary?
@@ -74,6 +76,7 @@ enum Command {
 struct CommandPos {
     file_id: u64,
     pos: u64,
+    size: u64,
 }
 
 /// Returns sorted file_ids in the given directory.
@@ -120,12 +123,13 @@ fn new_data_file<P: AsRef<Path>>(
 
 /// Rebuild index.
 ///
-/// Load all data files and store key/command position pairs in the index.
+/// Load given data file and store key/command position pairs in the index.
 fn load_index(
     file_id: u64,
     reader: &mut BufReaderWithPos<File>,
     index: &mut HashMap<String, CommandPos>,
-) -> Result<()> {
+) -> Result<u64> {
+    let mut uncompacted_size: u64 = 0;
     let mut pos = reader.seek(SeekFrom::Start(0))?;
     let mut stream = serde_json::Deserializer::from_reader(reader).into_iter::<Command>();
 
@@ -133,15 +137,26 @@ fn load_index(
         let new_pos = stream.byte_offset() as u64;
         match cmd? {
             Command::Set { key, .. } => {
-                index.insert(key, CommandPos { file_id, pos });
+                if let Some(old_cmd) = index.insert(
+                    key,
+                    CommandPos {
+                        file_id,
+                        pos,
+                        size: new_pos - pos,
+                    },
+                ) {
+                    uncompacted_size += old_cmd.size;
+                }
             }
             Command::Remove { key } => {
-                index.remove(&key);
+                let old_cmd = index.remove(&key).unwrap();
+                // The remove command in older data file is also redundant, its size = new_pos - pos
+                uncompacted_size += old_cmd.size + (new_pos - pos);
             }
         }
         pos = new_pos;
     }
-    Ok(())
+    Ok(uncompacted_size)
 }
 
 /// The `KvStore` stores string key/value pairs on disk.
@@ -163,10 +178,12 @@ fn load_index(
 /// store.remove("key".to_string()).unwrap();
 /// ```
 pub struct KvStore {
+    path: PathBuf,
     index: HashMap<String, CommandPos>, // A map of keys to log pointers
     readers: HashMap<u64, BufReaderWithPos<File>>, // A map of file_id to reader
     writer: BufWriterWithPos<File>,     // Writer of active data file
     active_file_id: u64,                // Active data file
+    uncompacted_size: u64,
 }
 
 impl KvStore {
@@ -193,10 +210,12 @@ impl KvStore {
 
         let file_list = sorted_file_list(&path)?;
 
+        let mut uncompacted_size = 0;
+
         for &file_id in &file_list {
             let mut reader = BufReaderWithPos::new(File::open(log_path(&path, file_id))?);
             // rebuild index
-            load_index(file_id, &mut reader, &mut index).unwrap();
+            uncompacted_size += load_index(file_id, &mut reader, &mut index).unwrap();
 
             readers.insert(file_id, reader);
         }
@@ -206,10 +225,12 @@ impl KvStore {
         let writer = new_data_file(&path, active_file_id, &mut readers)?;
 
         Ok(KvStore {
+            path,
             index,
             readers,
             writer,
             active_file_id,
+            uncompacted_size,
         })
     }
 
@@ -231,22 +252,30 @@ impl KvStore {
     /// store.set("key".to_string(), "value".to_string()).unwrap();
     /// ```
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
-        let entry_pos = self.writer.pos;
+        let pos = self.writer.pos;
 
-        // Write log to file, store key->offset in index
+        // Write log to file, store key/command position pair in index
         let command = Command::Set { key, value };
         serde_json::to_writer(&mut self.writer, &command)?;
         self.writer.flush()?;
 
         // Insert new entry in index
         if let Command::Set { key, .. } = command {
-            self.index.insert(
+            if let Some(old_cmd) = self.index.insert(
                 key,
                 CommandPos {
                     file_id: self.active_file_id,
-                    pos: entry_pos,
+                    pos,
+                    size: self.writer.pos - pos,
                 },
-            );
+            ) {
+                self.uncompacted_size += old_cmd.size;
+            }
+        }
+
+        // If uncompacted_size > COMPACT_THRESHOLD, then compact
+        if self.uncompacted_size > COMPACT_THRESHOLD {
+            self.compact()?;
         }
 
         Ok(())
@@ -275,7 +304,12 @@ impl KvStore {
     /// ```
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
         // Find given key in index, and load command from data file
-        if let Some(CommandPos { file_id, pos }) = self.index.get(&key) {
+        if let Some(CommandPos {
+            file_id,
+            pos,
+            size: _,
+        }) = self.index.get(&key)
+        {
             let reader = self.readers.get_mut(&file_id).unwrap();
             reader.seek(SeekFrom::Start(*pos))?;
             let mut a = serde_json::Deserializer::from_reader(reader);
@@ -312,6 +346,7 @@ impl KvStore {
         if !self.index.contains_key(&key) {
             Err(Error::KeyNotFound)
         } else {
+            let pos = self.writer.pos;
             // Write log to file, and store key/command position pairs in index
             let command = Command::Remove { key };
             serde_json::to_writer(&mut self.writer, &command)?;
@@ -319,10 +354,61 @@ impl KvStore {
 
             if let Command::Remove { key } = command {
                 // Remove key from index
-                self.index.remove(&key).unwrap();
+                let old_cmd = self.index.remove(&key).unwrap();
+
+                self.uncompacted_size += old_cmd.size + (self.writer.pos - pos);
+            }
+
+            // If uncompacted_size > COMPACT_THRESHOLD, then compact
+            if self.uncompacted_size > COMPACT_THRESHOLD {
+                self.compact()?;
             }
 
             Ok(())
         }
+    }
+
+    fn compact(&mut self) -> Result<()> {
+        // Collect set command in index into new data file
+        let compaction_file_id = self.active_file_id + 1;
+        let mut compaction_writer =
+            new_data_file(&self.path, compaction_file_id, &mut self.readers)?;
+
+        let mut new_pos = 0;
+        for cmd_pos in self.index.values_mut() {
+            let reader = self.readers.get_mut(&cmd_pos.file_id).unwrap();
+            if reader.pos != cmd_pos.pos {
+                reader.seek(SeekFrom::Start(cmd_pos.pos))?;
+            }
+            let mut entry_reader = reader.take(cmd_pos.size);
+            let n = io::copy(&mut entry_reader, &mut compaction_writer)?;
+
+            // Update index map
+            *cmd_pos = CommandPos {
+                file_id: compaction_file_id,
+                pos: new_pos,
+                size: n,
+            };
+            new_pos += n;
+        }
+        compaction_writer.flush()?;
+
+        // remove stale data files.
+        let stale_files: Vec<_> = self
+            .readers
+            .keys()
+            .filter(|&&file_id| file_id < compaction_file_id)
+            .cloned()
+            .collect();
+        for stale_file_id in stale_files {
+            self.readers.remove(&stale_file_id);
+            fs::remove_file(log_path(&self.path, stale_file_id))?;
+        }
+
+        self.active_file_id += 2;
+        self.writer = new_data_file(&self.path, self.active_file_id, &mut self.readers)?;
+        self.uncompacted_size = 0;
+
+        Ok(())
     }
 }

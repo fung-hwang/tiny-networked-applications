@@ -39,7 +39,7 @@ fn main() -> Result<()> {
     let options = Options::parse();
     // println!("{:?}", options);
 
-    let mut store = KvStore::open(current_dir().unwrap())?;
+    let mut store = KvStore::open(current_dir()?)?;
 
     match options.command {
         Commands::Set(Set { key, value }) => {
