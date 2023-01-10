@@ -9,6 +9,14 @@ use std::result;
 
 const COMPACT_THRESHOLD: u64 = 1_000_000; // Compact when reaching the threshold
 
+pub trait KvsEngine {
+    fn set(&mut self, key: String, value: String) -> Result<()>;
+
+    fn get(&mut self, key: String) -> Result<Option<String>>;
+
+    fn remove(&mut self, key: String) -> Result<()>;
+}
+
 struct BufReaderWithPos<T: Seek + Read> {
     buf_reader: BufReader<T>,
     pos: u64, // TODO: necessary?
