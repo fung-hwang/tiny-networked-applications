@@ -1,7 +1,12 @@
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use chrono::Local;
+use clap::{Parser, ValueEnum};
+use env_logger::Env;
 use kvs::{Error, KvStore, Result};
+use log::*;
+use log::{info, warn};
 use std::env::current_dir;
 use std::fs::read_to_string;
+use std::io::Write;
 
 #[derive(Parser, Debug)]
 #[command(name = "kvs-server", author, version, about, long_about = None)]
@@ -19,10 +24,26 @@ enum Engine {
 }
 
 fn main() -> Result<()> {
-    let mut options = Options::parse();
-    println!("{:?}", options);
+    // log init
+    env_logger::Builder::from_env(Env::default().default_filter_or("trace"))
+        .format(|buf, record| {
+            let style = buf.default_level_style(record.level());
+            writeln!(
+                buf,
+                "[{} {} {}] {}",
+                Local::now().format("%Y-%m-%d %H:%M:%S"),
+                style.value(record.level()),
+                record.module_path().unwrap_or("<unnamed>"),
+                &record.args()
+            )
+        })
+        .init();
 
-    // TODO: options.engine, using file to persistent
+    let mut options = Options::parse();
+
+    debug!("version = {:?}", env!("CARGO_PKG_VERSION"));
+    debug!("{:?}", options);
+
     // ==================================
     // cur\arg |  None |  kvs  |  sled  |
     // ----------------------------------
@@ -41,6 +62,7 @@ fn main() -> Result<()> {
         if options.engine.is_none() {
             options.engine = cur_engine;
         } else if cur_engine != options.engine {
+            // TODO: why kvs-server exit?
             std::process::exit(1);
         }
     }

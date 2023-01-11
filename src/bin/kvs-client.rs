@@ -43,29 +43,31 @@ fn main() -> Result<()> {
 
     // let mut store = KvStore::open(current_dir()?)?;
 
-    // match options.command {
-    //     Commands::Set(Set { key, value }) => {
-    //         store.set(key, value).unwrap();
-    //     }
-    //     Commands::Get(Get { key }) => {
-    //         let cmd = store.get(key)?;
-    //         if let Some(value) = cmd {
-    //             print!("{}", value);
-    //         } else {
-    //             print!("Key not found");
-    //         }
-    //     }
+    match options.command {
+        Commands::Set(Set { key, value }) => {
+            // store.set(key, value).unwrap();
+        }
+        Commands::Get(Get { key }) => {
+            // let cmd = store.get(key)?;
+            // if let Some(value) = cmd {
+            //     print!("{}", value);
+            // } else {
+            //     print!("Key not found");
+            // }
+        }
 
-    //     Commands::Rm(Remove { key }) => match store.remove(key) {
-    //         Ok(_) => {}
-    //         Err(Error::KeyNotFound) => {
-    //             print!("Key not found");
-    //             std::process::exit(1);
-    //         }
-    //         Err(err) => {
-    //             return Err(err);
-    //         }
-    //     },
-    // }
+        Commands::Rm(Remove { key }) => {
+            // match store.remove(key) {
+            //     Ok(_) => {}
+            //     Err(Error::KeyNotFound) => {
+            //         print!("Key not found");
+            //         std::process::exit(1);
+            //     }
+            //     Err(err) => {
+            //         return Err(err);
+            //     }
+            // },
+        }
+    }
     Ok(())
 }
