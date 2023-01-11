@@ -2,6 +2,7 @@ use anyhow;
 use clap::{Args, Parser, Subcommand};
 use kvs::{Error, KvStore, Result};
 use std::env::current_dir;
+use std::net::{TcpListener, TcpStream};
 
 #[derive(Parser, Debug)]
 #[command(name = "kvs-client", author, version, about, long_about = None)]
@@ -42,33 +43,22 @@ fn main() -> anyhow::Result<()> {
     let options = Options::parse();
     println!("{:?}", options);
 
-    // let mut store = KvStore::open(current_dir()?)?;
+    if let Ok(mut stream) = TcpStream::connect(&options.addr) {
+        match options.command {
+            Commands::Set(Set { key, value }) => {
+                unimplemented!();
+            }
+            Commands::Get(Get { key }) => {
+                unimplemented!();
+            }
 
-    match options.command {
-        Commands::Set(Set { key, value }) => {
-            // store.set(key, value).unwrap();
+            Commands::Rm(Remove { key }) => {
+                unimplemented!();
+            }
         }
-        Commands::Get(Get { key }) => {
-            // let cmd = store.get(key)?;
-            // if let Some(value) = cmd {
-            //     print!("{}", value);
-            // } else {
-            //     print!("Key not found");
-            // }
-        }
-
-        Commands::Rm(Remove { key }) => {
-            // match store.remove(key) {
-            //     Ok(_) => {}
-            //     Err(Error::KeyNotFound) => {
-            //         print!("Key not found");
-            //         std::process::exit(1);
-            //     }
-            //     Err(err) => {
-            //         return Err(err);
-            //     }
-            // },
-        }
+    } else {
+        println!("Couldn't connect to server...");
     }
-    Ok(())
+
+    anyhow::Ok(())
 }

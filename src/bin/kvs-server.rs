@@ -6,7 +6,8 @@ use kvs::{Error, KvStore, Result};
 use log::{debug, error, info, warn};
 use std::env::current_dir;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 
 #[derive(Parser, Debug)]
 #[command(name = "kvs-server", author, version, about, long_about = None)]
@@ -48,7 +49,25 @@ fn main() -> anyhow::Result<()> {
 
     debug!("After setting engine, {:?}", options);
 
+    // set up the networking
+    let listener = TcpListener::bind(&options.addr).unwrap();
+
+    for stream in listener.incoming() {
+        let stream = stream.unwrap();
+
+        handle_connection(stream)?;
+    }
+
     // (loop) reveive cmd and execute
+
+    Ok(())
+}
+
+fn handle_connection(mut stream: TcpStream) -> anyhow::Result<()> {
+    let mut buf = [0; 128];
+    stream.read(&mut buf).unwrap();
+    let buffer_str = std::str::from_utf8(&buf[..])?.trim_matches(char::from(0));
+    debug!("Request: {:?}", buffer_str);
 
     Ok(())
 }
@@ -91,7 +110,7 @@ fn set_engine(options: &mut Options) -> anyhow::Result<()> {
             std::process::exit(1);
         }
     }
-    Ok(())
+    anyhow::Ok(())
 }
 
 /// Get current engine from engine file
