@@ -1,3 +1,4 @@
+use anyhow;
 use clap::{Args, Parser, Subcommand};
 use kvs::{Error, KvStore, Result};
 use std::env::current_dir;
@@ -37,7 +38,7 @@ struct Remove {
     key: String,
 }
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     let options = Options::parse();
     println!("{:?}", options);
 

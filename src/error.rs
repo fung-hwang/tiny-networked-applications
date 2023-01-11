@@ -11,8 +11,6 @@ pub enum Error {
     KeyNotFound,
     #[error("Unexpected Command")]
     UnexpectedCommand,
-    #[error("Unexpected Engine")]
-    UnexpectedEngine(String),
 }
 
 /// Alias for a Result with the error type kvs::Error

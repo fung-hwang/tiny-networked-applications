@@ -1,11 +1,11 @@
+use anyhow;
 use chrono::Local;
 use clap::{Parser, ValueEnum};
 use env_logger::Env;
 use kvs::{Error, KvStore, Result};
-use log::*;
-use log::{info, warn};
+use log::{debug, error, info, warn};
 use std::env::current_dir;
-use std::fs::read_to_string;
+use std::fs;
 use std::io::Write;
 
 #[derive(Parser, Debug)]
@@ -23,7 +23,7 @@ enum Engine {
     Sled,
 }
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     // log init
     env_logger::Builder::from_env(Env::default().default_filter_or("trace"))
         .format(|buf, record| {
@@ -44,46 +44,69 @@ fn main() -> Result<()> {
     debug!("version = {:?}", env!("CARGO_PKG_VERSION"));
     debug!("{:?}", options);
 
-    // ==================================
-    // cur\arg |  None |  kvs  |  sled  |
-    // ----------------------------------
-    //    None |  kvs  |  kvs  |  sled  |
-    // ----------------------------------
-    //    kvs  |  kvs  |  kvs  |  Err   |
-    // ----------------------------------
-    //    sled |  sled |  Err  |  sled  |
-    // ==================================
-    let cur_engine = current_engine()?;
-    if cur_engine.is_none() && options.engine.is_none() {
-        options.engine = Some(Engine::Kvs)
-        // TODO: if cur_engine.is_none() && options.engine.is_some(), write engine type to file
-    }
-    if cur_engine.is_some() {
-        if options.engine.is_none() {
-            options.engine = cur_engine;
-        } else if cur_engine != options.engine {
-            // TODO: why kvs-server exit?
-            std::process::exit(1);
-        }
-    }
+    set_engine(&mut options)?;
+
+    debug!("After setting engine, {:?}", options);
 
     // (loop) reveive cmd and execute
 
     Ok(())
 }
 
-fn current_engine() -> Result<Option<Engine>> {
+/// If --engine is specified, then ENGINE-NAME must be either "kvs", in which case the built-in engine is used,
+/// or "sled", in which case sled is used.
+/// If this is the first run (there is no data previously persisted) then the default value is "kvs";
+/// if there is previously persisted data then the default is the engine already in use.
+/// If data was previously persisted with a different engine than selected, print an error and exit with a non-zero exit code.
+/// ==================================
+/// cur\arg |  None |  kvs  |  sled  |
+/// ----------------------------------
+///    None |  kvs  |  kvs  |  sled  |
+/// ----------------------------------
+///    kvs  |  kvs  |  kvs  |  Err   |
+/// ----------------------------------
+///    sled |  sled |  Err  |  sled  |
+/// ==================================
+fn set_engine(options: &mut Options) -> anyhow::Result<()> {
+    let cur_engine = current_engine()?;
+    if cur_engine.is_none() {
+        if options.engine.is_none() {
+            options.engine = Some(Engine::Kvs)
+        } else {
+            // write engine to engine file
+            fs::write(
+                current_dir()?.join("engine"),
+                format!("{:?}", options.engine),
+            )?;
+        }
+    } else {
+        if options.engine.is_none() {
+            options.engine = cur_engine;
+        } else if cur_engine != options.engine {
+            error!(
+                "cur_engine: {:?} != options.engine: {:?}",
+                cur_engine, options.engine
+            );
+            // TODO: why kvs-server exit?
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
+
+/// Get current engine from engine file
+///
+/// If there is no engine exists, return Ok(None).
+fn current_engine() -> anyhow::Result<Option<Engine>> {
     let engine_path = current_dir()?.join("engine");
     if !engine_path.exists() {
         Ok(None)
     } else {
-        let engine = read_to_string(engine_path)?;
-        if engine == "kvs".to_owned() {
-            Ok(Some(Engine::Kvs))
-        } else if engine == "sled".to_owned() {
-            Ok(Some(Engine::Sled))
+        if let Ok(engine) = Engine::from_str(&fs::read_to_string(engine_path)?, true) {
+            Ok(Some(engine))
         } else {
-            Err(Error::UnexpectedEngine(engine))
+            error!("Unexpected engine type");
+            Ok(None)
         }
     }
 }
