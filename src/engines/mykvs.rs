@@ -1,3 +1,4 @@
+use crate::engines::KvsEngine;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -8,14 +9,6 @@ use std::path::{Path, PathBuf};
 use std::result;
 
 const COMPACT_THRESHOLD: u64 = 1_000_000; // Compact when reaching the threshold
-
-pub trait KvsEngine {
-    fn set(&mut self, key: String, value: String) -> Result<()>;
-
-    fn get(&mut self, key: String) -> Result<Option<String>>;
-
-    fn remove(&mut self, key: String) -> Result<()>;
-}
 
 struct BufReaderWithPos<T: Seek + Read> {
     buf_reader: BufReader<T>,
@@ -242,6 +235,52 @@ impl KvStore {
         })
     }
 
+    fn compact(&mut self) -> Result<()> {
+        // Collect set command in index into new data file
+        let compaction_file_id = self.active_file_id + 1;
+        let mut compaction_writer =
+            new_data_file(&self.path, compaction_file_id, &mut self.readers)?;
+
+        let mut new_pos = 0;
+        for cmd_pos in self.index.values_mut() {
+            let reader = self.readers.get_mut(&cmd_pos.file_id).unwrap();
+            if reader.pos != cmd_pos.pos {
+                reader.seek(SeekFrom::Start(cmd_pos.pos))?;
+            }
+            let mut entry_reader = reader.take(cmd_pos.size);
+            let n = io::copy(&mut entry_reader, &mut compaction_writer)?;
+
+            // Update index map
+            *cmd_pos = CommandPos {
+                file_id: compaction_file_id,
+                pos: new_pos,
+                size: n,
+            };
+            new_pos += n;
+        }
+        compaction_writer.flush()?;
+
+        // remove stale data files.
+        let stale_files: Vec<_> = self
+            .readers
+            .keys()
+            .filter(|&&file_id| file_id < compaction_file_id)
+            .cloned()
+            .collect();
+        for stale_file_id in stale_files {
+            self.readers.remove(&stale_file_id);
+            fs::remove_file(log_path(&self.path, stale_file_id))?;
+        }
+
+        self.active_file_id += 2;
+        self.writer = new_data_file(&self.path, self.active_file_id, &mut self.readers)?;
+        self.uncompacted_size = 0;
+
+        Ok(())
+    }
+}
+
+impl KvsEngine for KvStore {
     /// Inserts a key-value pair into the kvstore.
     ///
     /// If the map did have this key present, the value will be updated.
@@ -259,7 +298,7 @@ impl KvStore {
     /// let mut store = KvStore::open(current_dir().unwrap()).unwrap();
     /// store.set("key".to_string(), "value".to_string()).unwrap();
     /// ```
-    pub fn set(&mut self, key: String, value: String) -> Result<()> {
+    fn set(&mut self, key: String, value: String) -> Result<()> {
         let pos = self.writer.pos;
 
         // Write log to file, store key/command position pair in index
@@ -310,7 +349,7 @@ impl KvStore {
     /// let val = store.get("key".to_string()).unwrap();
     /// assert_eq!(val, Some("value".to_string()));
     /// ```
-    pub fn get(&mut self, key: String) -> Result<Option<String>> {
+    fn get(&mut self, key: String) -> Result<Option<String>> {
         // Find given key in index, and load command from data file
         if let Some(CommandPos {
             file_id,
@@ -350,7 +389,7 @@ impl KvStore {
     /// store.set("key".to_string(), "value".to_string()).unwrap();
     /// store.remove("key".to_string()).unwrap();
     /// ```
-    pub fn remove(&mut self, key: String) -> Result<()> {
+    fn remove(&mut self, key: String) -> Result<()> {
         if !self.index.contains_key(&key) {
             Err(Error::KeyNotFound)
         } else {
@@ -374,49 +413,5 @@ impl KvStore {
 
             Ok(())
         }
-    }
-
-    fn compact(&mut self) -> Result<()> {
-        // Collect set command in index into new data file
-        let compaction_file_id = self.active_file_id + 1;
-        let mut compaction_writer =
-            new_data_file(&self.path, compaction_file_id, &mut self.readers)?;
-
-        let mut new_pos = 0;
-        for cmd_pos in self.index.values_mut() {
-            let reader = self.readers.get_mut(&cmd_pos.file_id).unwrap();
-            if reader.pos != cmd_pos.pos {
-                reader.seek(SeekFrom::Start(cmd_pos.pos))?;
-            }
-            let mut entry_reader = reader.take(cmd_pos.size);
-            let n = io::copy(&mut entry_reader, &mut compaction_writer)?;
-
-            // Update index map
-            *cmd_pos = CommandPos {
-                file_id: compaction_file_id,
-                pos: new_pos,
-                size: n,
-            };
-            new_pos += n;
-        }
-        compaction_writer.flush()?;
-
-        // remove stale data files.
-        let stale_files: Vec<_> = self
-            .readers
-            .keys()
-            .filter(|&&file_id| file_id < compaction_file_id)
-            .cloned()
-            .collect();
-        for stale_file_id in stale_files {
-            self.readers.remove(&stale_file_id);
-            fs::remove_file(log_path(&self.path, stale_file_id))?;
-        }
-
-        self.active_file_id += 2;
-        self.writer = new_data_file(&self.path, self.active_file_id, &mut self.readers)?;
-        self.uncompacted_size = 0;
-
-        Ok(())
     }
 }

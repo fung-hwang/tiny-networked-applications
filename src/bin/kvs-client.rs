@@ -1,42 +1,20 @@
 use anyhow;
-use clap::{Args, Parser, Subcommand};
-use kvs::{Error, KvStore, Result};
-use std::env::current_dir;
-use std::net::{TcpListener, TcpStream};
+use bytes::BytesMut;
+use clap::Parser;
+use common::*;
+use redis_protocol::resp2::prelude::*;
+use std::io::Write;
+use std::net::TcpStream;
+
+mod common;
 
 #[derive(Parser, Debug)]
 #[command(name = "kvs-client", author, version, about, long_about = None)]
 struct Options {
     #[command(subcommand)]
-    command: Commands,
-    #[arg(short, long, default_value = "127.0.0.1:4000", help = "IP:PORT")]
+    command: Command,
+    #[arg(short, long, default_value = "127.0.0.1:7878", help = "IP:PORT")]
     addr: String,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// Set the value of a string key to a string
-    Set(Set),
-    /// Get the string value of a given string key
-    Get(Get),
-    /// Remove a given key
-    Rm(Remove),
-}
-
-#[derive(Args, Debug)]
-struct Set {
-    key: String,
-    value: String,
-}
-
-#[derive(Args, Debug)]
-struct Get {
-    key: String,
-}
-
-#[derive(Args, Debug)]
-struct Remove {
-    key: String,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -44,18 +22,16 @@ fn main() -> anyhow::Result<()> {
     println!("{:?}", options);
 
     if let Ok(mut stream) = TcpStream::connect(&options.addr) {
-        match options.command {
-            Commands::Set(Set { key, value }) => {
-                unimplemented!();
-            }
-            Commands::Get(Get { key }) => {
-                unimplemented!();
-            }
+        let frame = Frame::from(options.command);
 
-            Commands::Rm(Remove { key }) => {
-                unimplemented!();
-            }
-        }
+        let mut buf = BytesMut::new();
+        let len = match encode_bytes(&mut buf, &frame) {
+            Ok(l) => l,
+            Err(e) => panic!("Error encoding frame: {:?}", e),
+        };
+        println!("Encoded {} bytes into buffer with contents {:?}", len, buf);
+
+        stream.write(&buf).unwrap();
     } else {
         println!("Couldn't connect to server...");
     }

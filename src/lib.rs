@@ -1,7 +1,9 @@
 //! A on-disk key-value store.
 
 pub use error::{Error, Result};
-pub use kv::{KvStore, KvsEngine};
 
+pub use engines::mykvs::KvStore;
+pub use engines::KvsEngine;
+
+mod engines;
 mod error;
-mod kv;

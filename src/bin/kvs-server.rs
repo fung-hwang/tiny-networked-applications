@@ -1,18 +1,22 @@
 use anyhow;
+use bytes::{Bytes, BytesMut};
 use chrono::Local;
 use clap::{Parser, ValueEnum};
+use common::*;
 use env_logger::Env;
-use kvs::{Error, KvStore, Result};
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
+use redis_protocol::resp2::prelude::*;
 use std::env::current_dir;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+
+mod common;
 
 #[derive(Parser, Debug)]
 #[command(name = "kvs-server", author, version, about, long_about = None)]
 struct Options {
-    #[arg(short, long, default_value = "127.0.0.1:4000", help = "IP:PORT")]
+    #[arg(short, long, default_value = "127.0.0.1:7878", help = "IP:PORT")]
     addr: String,
     #[arg(short, long, help = "ENGINE-NAME")]
     engine: Option<Engine>,
@@ -49,7 +53,7 @@ fn main() -> anyhow::Result<()> {
 
     debug!("After setting engine, {:?}", options);
 
-    // set up the networking
+    // set up the networking, the server is synchronous and single-threaded.
     let listener = TcpListener::bind(&options.addr).unwrap();
 
     for stream in listener.incoming() {
@@ -58,18 +62,33 @@ fn main() -> anyhow::Result<()> {
         handle_connection(stream)?;
     }
 
-    // (loop) reveive cmd and execute
-
     Ok(())
 }
 
-fn handle_connection(mut stream: TcpStream) -> anyhow::Result<()> {
-    let mut buf = [0; 128];
-    stream.read(&mut buf).unwrap();
-    let buffer_str = std::str::from_utf8(&buf[..])?.trim_matches(char::from(0));
-    debug!("Request: {:?}", buffer_str);
+// TODO: handle single request per connect -> many requests per connect
+fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
+    let mut reader = BufReader::new(stream);
+    let mut buf = [0; 1024];
+    reader.read(&mut buf)?;
 
-    Ok(())
+    debug!(
+        "{:?}",
+        std::str::from_utf8(&buf[..])?.trim_matches(char::from(0))
+    );
+
+    // parse the contents of buf
+    let (frame, frame_size) = match decode(&Bytes::copy_from_slice(&buf)) {
+        Ok(Some((f, c))) => (f, c),
+        Ok(None) => panic!("Incomplete frame."),
+        Err(e) => panic!("Error parsing bytes: {:?}", e),
+    };
+    debug!("Parsed frame {:?} and consumed {} bytes", frame, frame_size);
+
+    let cmd = Command::try_from(frame)?;
+
+    info!("Command: {:?}", cmd);
+
+    anyhow::Ok(())
 }
 
 /// If --engine is specified, then ENGINE-NAME must be either "kvs", in which case the built-in engine is used,

@@ -16,6 +16,8 @@ log = { version = "0.4", features = ["release_max_level_warn"] }
 env_logger = "0.10"
 chrono = "0.4"
 anyhow = "1.0"
+redis-protocol = "4"
+bytes = "1"
 
 
 [dev-dependencies]
