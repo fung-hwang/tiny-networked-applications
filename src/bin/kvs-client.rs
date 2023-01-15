@@ -18,6 +18,8 @@ struct Options {
 }
 
 fn main() -> anyhow::Result<()> {
+    // TODO: transfer single request per connect(parse args) -> many requests per connect(parse input to command)
+    // Imitate deet
     let options = Options::parse();
     println!("{:?}", options);
 

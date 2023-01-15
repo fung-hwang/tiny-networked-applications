@@ -110,13 +110,12 @@ fn set_engine(options: &mut Options) -> anyhow::Result<()> {
     if cur_engine.is_none() {
         if options.engine.is_none() {
             options.engine = Some(Engine::Kvs)
-        } else {
-            // write engine to engine file
-            fs::write(
-                current_dir()?.join("engine"),
-                format!("{:?}", options.engine),
-            )?;
         }
+        // write engine to engine file
+        fs::write(
+            current_dir()?.join("engine"),
+            format!("{:?}", options.engine),
+        )?;
     } else {
         if options.engine.is_none() {
             options.engine = cur_engine;
