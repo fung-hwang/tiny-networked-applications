@@ -11,6 +11,8 @@ pub enum Error {
     KeyNotFound,
     #[error("Unexpected Command")]
     UnexpectedCommand,
+    #[error("redb")]
+    Redb(#[from] redb::Error),
 }
 
 /// Alias for a Result with the error type kvs::Error

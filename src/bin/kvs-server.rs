@@ -94,20 +94,26 @@ fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
     anyhow::Ok(())
 }
 
+/// Set the engine in options, according to current engine and args --engine.
+///
 /// If --engine is specified, then ENGINE-NAME must be either "kvs", in which case the built-in engine is used,
 /// or "sled", in which case sled is used.
-/// If this is the first run (there is no data previously persisted) then the default value is "kvs";
+///
+/// If this is the first run (there is no data previously persisted) then the default value is "kvs".
+///
 /// if there is previously persisted data then the default is the engine already in use.
+///
 /// If data was previously persisted with a different engine than selected, print an error and exit with a non-zero exit code.
-/// ==================================
-/// cur\arg |  None |  kvs  |  sled  |
-/// ----------------------------------
-///    None |  kvs  |  kvs  |  sled  |
-/// ----------------------------------
-///    kvs  |  kvs  |  kvs  |  Err   |
-/// ----------------------------------
-///    sled |  sled |  Err  |  sled  |
-/// ==================================
+///
+// ==================================
+// cur\arg |  None |  kvs  |  sled  |
+// ----------------------------------
+//    None |  kvs  |  kvs  |  sled  |
+// ----------------------------------
+//    kvs  |  kvs  |  kvs  |  Err   |
+// ----------------------------------
+//    sled |  sled |  Err  |  sled  |
+// ==================================
 fn set_engine(options: &mut Options) -> anyhow::Result<()> {
     let cur_engine = current_engine()?;
     if cur_engine.is_none() {

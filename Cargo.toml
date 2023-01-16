@@ -18,7 +18,7 @@ chrono = "0.4"
 anyhow = "1.0"
 redis-protocol = "4"
 bytes = "1"
-
+redb = "0.11"
 
 [dev-dependencies]
 assert_cmd = "2.0"
