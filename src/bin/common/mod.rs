@@ -82,21 +82,21 @@ impl TryFrom<Frame> for Command {
                         key: from_utf8(&v[1])?.to_string(),
                     }))
                 } else {
-                    Err(CommandError::Parse)
+                    Err(CommandError::ParseFrame)
                 }
             } else {
-                Err(CommandError::Parse)
+                Err(CommandError::ParseFrame)
             }
         } else {
-            Err(CommandError::Parse)
+            Err(CommandError::ParseFrame)
         }
     }
 }
 
 #[derive(Error, Debug)]
 pub enum CommandError {
-    #[error("Cannot parse Command from Frame")]
-    Parse,
+    #[error("Cannot parse Frame into Command")]
+    ParseFrame,
     #[error("Utf8Error")]
     Utf8Error(#[from] std::str::Utf8Error),
 }

@@ -2,7 +2,7 @@
 
 pub use error::{Error, Result};
 
-pub use engines::mykvs::KvStore;
+pub use engines::kvstore::KvStore;
 pub use engines::KvsEngine;
 
 mod engines;

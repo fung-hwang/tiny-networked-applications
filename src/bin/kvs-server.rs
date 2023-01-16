@@ -4,6 +4,7 @@ use chrono::Local;
 use clap::{Parser, ValueEnum};
 use common::*;
 use env_logger::Env;
+use kvs::KvsEngine;
 use log::{debug, error, info};
 use redis_protocol::resp2::prelude::*;
 use std::env::current_dir;
@@ -23,7 +24,7 @@ struct Options {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-enum Engine {
+pub enum Engine {
     Kvs,
     Sled,
 }
@@ -62,7 +63,7 @@ fn main() -> anyhow::Result<()> {
         handle_connection(stream)?;
     }
 
-    Ok(())
+    anyhow::Ok(())
 }
 
 // TODO: handle single request per connect -> many requests per connect
@@ -87,6 +88,8 @@ fn handle_connection(stream: TcpStream) -> anyhow::Result<()> {
     let cmd = Command::try_from(frame)?;
 
     info!("Command: {:?}", cmd);
+
+    // run server
 
     anyhow::Ok(())
 }
@@ -137,13 +140,28 @@ fn set_engine(options: &mut Options) -> anyhow::Result<()> {
 fn current_engine() -> anyhow::Result<Option<Engine>> {
     let engine_path = current_dir()?.join("engine");
     if !engine_path.exists() {
-        Ok(None)
+        anyhow::Ok(None)
     } else {
         if let Ok(engine) = Engine::from_str(&fs::read_to_string(engine_path)?, true) {
-            Ok(Some(engine))
+            anyhow::Ok(Some(engine))
         } else {
             error!("Unexpected engine type");
-            Ok(None)
+            anyhow::Ok(None)
         }
+    }
+}
+
+// TODO: trait object or generic struct?
+pub struct Server {
+    engine: Box<dyn KvsEngine>,
+}
+
+impl Server {
+    pub fn new(engine: Engine) -> Self {
+        unimplemented!()
+    }
+
+    pub fn run(cmd: Command) {
+        unimplemented!()
     }
 }

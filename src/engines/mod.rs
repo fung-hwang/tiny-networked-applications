@@ -1,6 +1,6 @@
 use crate::Result;
 
-pub mod mykvs;
+pub mod kvstore;
 pub mod sled;
 
 pub trait KvsEngine {
