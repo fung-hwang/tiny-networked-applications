@@ -1,5 +1,5 @@
 use crate::{KvsEngine, Result};
-use redb::{Database, Error, ReadableTable, TableDefinition};
+use redb::{Database, ReadableTable, TableDefinition};
 
 const TABLE: TableDefinition<&str, &str> = TableDefinition::new("table_1");
 

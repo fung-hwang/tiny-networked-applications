@@ -1,4 +1,9 @@
+/.vscode
+/.idea
 /target
 /Cargo.lock
-/.vscode
 *.log
+engine
+/kvstore
+/redb
+/sled
