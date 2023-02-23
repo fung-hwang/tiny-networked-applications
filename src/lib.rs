@@ -6,5 +6,7 @@ pub use engines::kvstore::*;
 pub use engines::redb::*;
 pub use engines::KvsEngine;
 
+mod client;
 mod engines;
 mod error;
+mod server;

@@ -20,7 +20,7 @@ mod common;
 struct Options {
     #[arg(short, long, default_value = "127.0.0.1:7878", help = "IP:PORT")]
     addr: String,
-    #[arg(short, long, help = "ENGINE-NAME")]
+    #[arg(short, long, help = "ENGINE-TYPE")]
     engine: Option<Engine>,
 }
 
@@ -51,16 +51,11 @@ impl Options {
             if self.engine.is_none() {
                 self.engine = Some(Engine::KvStore)
             }
-            // write engine type to engine file
-            // e.g. kvs
+            // write engine type to engine file，e.g. kvs
             fs::write(
                 current_dir()?.join("engine"),
                 format!("{}", serde_json::to_string(&self.engine)?),
             )?;
-            // fs::write(
-            //     current_dir()?.join("engine"),
-            //     format!("{:?}", self.engine.unwrap()),
-            // )?;
         } else {
             if self.engine.is_none() {
                 self.engine = cur_engine;
@@ -199,21 +194,21 @@ impl<E: KvsEngine> KvsServer<E> {
         };
         debug!("Parsed frame {:?} and consumed {} bytes", frame, frame_size);
 
-        let cmd = Command::try_from(frame)?;
-        info!("Command: {:?}", cmd);
+        let request = Request::try_from(frame)?;
+        info!("Request: {:?}", request);
 
         // cmd excutor
-        match cmd {
-            Command::Set(Set { key, value }) => {
+        match request {
+            Request::Set(Set { key, value }) => {
                 debug!("set key:{:?} value:{:?}", key, value);
                 self.engine.set(key, value)?;
             }
-            Command::Get(Get { key }) => {
+            Request::Get(Get { key }) => {
                 debug!("get key:{:?}", key);
                 let a = self.engine.get(key)?;
                 info!("Get {:?}", a);
             }
-            Command::Rm(Remove { key }) => {
+            Request::Rm(Remove { key }) => {
                 debug!("remove key:{:?}", key);
                 self.engine.remove(key)?;
             }

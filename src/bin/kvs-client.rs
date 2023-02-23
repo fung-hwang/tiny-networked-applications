@@ -12,14 +12,14 @@ mod common;
 #[command(name = "kvs-client", author, version, about, long_about = None)]
 struct Options {
     #[command(subcommand)]
-    command: Command,
+    command: Request,
     #[arg(short, long, default_value = "127.0.0.1:7878", help = "IP:PORT")]
     addr: String,
 }
 
 fn main() -> anyhow::Result<()> {
     // TODO: transfer single request per connect(parse args) -> many requests per connect(parse input to command)
-    // Imitate deet
+    // TODO: Imitate deet
     let options = Options::parse();
     println!("{:?}", options);
 
